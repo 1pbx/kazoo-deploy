@@ -6,7 +6,9 @@ Our goal is to maintain a set of scripts with interactive and automated install 
 
 [1pbx](https://1pbx.io/) has taken the original scripts which were created for CentOS 6 systems and updated them to be used with CentOS 7.
 
+### List of Scripts
 
+Collection of scripts are within the scripts directory https://github.com/1pbx/kazoo-deploy/tree/master/scripts
 
 #### Original Script Source
 
