@@ -1,1 +1,5 @@
 theme: jekyll-theme-slate
+title: Kazoo Install and Deployment Scripts by 1pbx
+description: To maintain an up-to-date collection of install scripts intended to be used on fresh CentOS 7 installations.
+show_downloads: true
+google_analytics: UA-102902171-9
