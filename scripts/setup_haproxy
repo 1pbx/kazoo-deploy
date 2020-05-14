@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+
+set -e
+set -o nounset
+
+lockfile="/var/lock/subsys/setup_haproxy.lockfile"
+
+. /opt/kazoo_install/setup_common
+trap error_exit SIGHUP SIGTERM ERR EXIT
+trap int_exit SIGINT SIGQUIT
+
+#
+# VARS
+#
+
+#File to edit
+haproxy_config="/etc/kazoo/haproxy/haproxy.cfg"
+
+#HAPROXY PROXY ARRAYS for storing proxy lists
+declare -a proxies_data
+declare -a ips
+declare -a proxies_mgr
+
+
+
+ip=""
+ip_question="Please enter your bigcouch IPs: "
+ip_re="$ip_address_regex"
+ip_hint="this should be one of the ip addresses of your bigcouch servers"
+ip_ref="ip"
+
+fqdn=""
+fqdn_question="Please enter your bigcouch FQDN: "
+fqdn_re="$fqdn_regex"
+fqdn_hint="Fully qualified domain name for bigcouch HA proxy config"
+fqdn_ref="fqdn"
+
+
+backup=""
+backup_question="Do you want to make this server a backup? [y/n]: "
+backup_re="[yYnN]"
+backup_hint="Fully qualified domain name for bigcouch HA proxy config"
+backup_ref="backup"
+
+ask_proxies(){
+    while :; do
+        local fqdn
+        ask fqdn
+        local ip
+        ask ip
+        local backup
+        ask backup
+
+        if [[ $backup =~ ^[Yy] ]];then 
+           backup="backup"        
+        else 
+           backup=""
+        fi         
+
+        config_data="    server $fqdn $ip:5984 ${backup:-}"
+        config_mgr="    server $fqdn $ip:5986 ${backup:-}"
+
+        proxies_data+=("$config_data")
+        proxies_mgr+=("$config_mgr")
+        local answer 
+        confirm "Do you want to add another bigcouch fqdn to proxy list? [y|n]?"
+        if [[ $answer =~ ^[yY] ]];then
+            continue
+        else
+            break
+        fi
+    done
+}
+
+set_proxies(){
+    local tempfile="${haproxy_config}.tmp"
+    local mgr_flag=""
+    local data_flag=""   
+
+    #blank out tmp file just to be safe
+    >$tempfile
+
+    while read line ;do
+        if [[ $line =~ "listen bigcouch-data" ]];then
+            data_flag=1
+            echo $line >> $tempfile
+        elif [[ $line =~ "listen bigcouch-mgr" ]];then
+            mgr_flag=1
+            echo $line >> $tempfile
+        elif [[ $line =~ ^server ]];then
+            if [[  ${data_flag:-} ]];then 
+                for config in "${proxies_data[@]}";do
+                    dbg "Adding proxy line for data to $haproxy_config file - $config"
+                    echo "$config" >> $tempfile
+                done
+                data_flag=""
+            elif [[ ${mgr_flag:-} ]];then 
+                for config in "${proxies_mgr[@]}";do
+                    dbg "Adding proxy line for mgr to $haproxy_config file - $config"
+                    echo "$config" >> $tempfile
+                done
+                mgr_flag=""
+            fi
+        else
+            echo $line >> $tempfile 
+        fi
+    done < $haproxy_config
+    mv $tempfile $haproxy_config 
+}
+
+
+interactive() {
+    ask_proxies
+}
+
+info " : Configuring HAProxy : "
+check_root
+check_lock 
+
+get_system_hostname
+
+if [[ ${1:-} =~ -a ]];then
+    all_in_one=1
+fi
+
+if [  ${all_in_one:-} ];then
+   #if allinone we default everything we can
+   fqdn=$system_hostname
+   
+   config_data="    server $fqdn 127.0.0.1:5984"
+   config_mgr="    server $fqdn 127.0.0.1:5986"
+   proxies_data+=("$config_data")
+   proxies_mgr+=("$config_mgr")
+ 
+else
+   info "NOTE: You can type '${NC}?${blue}' as a response to any question for a hint!"
+   interactive
+fi
+
+dbg "Applying HAProxy configuration..."
+
+set_proxies
+
+clean_exit 
+
+

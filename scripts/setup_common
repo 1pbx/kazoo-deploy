@@ -1,0 +1,446 @@
+#!/usr/bin/env bash
+
+default_cookie=""
+system_hostname=""
+
+logfile="/var/log/kazoo_config.log"
+
+declare -a errors_encountered
+
+args_save=$(printf '%s '  "$@") 
+
+#print formatting and logging func
+green='\e[0;32m'
+red='\e[0;31m'
+yellow='\e[0;33m'
+NC='\e[0m'
+blue='\e[0;36m'
+
+dbg(){
+    echo -e " - ${green}$* ${NC} "
+    echo -e " - ${green}$* ${NC} " >> $logfile
+}
+
+info(){
+    echo -e "${blue}$* ${NC} "
+    echo -e "${blue}$* ${NC} " >> $logfile
+}
+
+error(){
+    error_msg="$*"
+    echo 
+    error="${red}ERROR: ${error_msg} ${NC} "
+    echo -e "$error" 1>&2
+    echo -e "$error" >> $logfile
+    errors_encountered+=("$error")   
+}
+
+warn(){
+    echo -e "${yellow}$* ${NC} ";
+    echo -e "${yellow}$* ${NC} " >> $logfile
+}
+
+log_print(){
+    while read line; do 
+        echo -e $line
+        echo -e $line >> $logfile
+    done
+}
+
+cookie_file="/etc/kazoo/erlang.cookie"
+
+#validation regexes for use in ask 
+url_regex="^(https?:\/\/)?([0-9a-z\.-\.]+)([a-z\.]{2,6})?([:][0-9]+)?([\/\w\.-]*)*\/?$"
+ip_address_regex="^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
+fqdn_regex='(?=^.{4,255}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$)'
+ip_fqdn_regex="$ip_address_regex|$fqdn_regex"
+name_regex="[a-zA-Z0-9\\.-\\_]+"
+
+#Safety stuff (must be root, lockfile functions, trap and clean_exit function)
+
+#ensure this is all being run by root
+check_root(){
+  if [[ $EUID -ne 0 ]]; then
+     error "insufficient permissions"
+     warn "This script must be executed by a ${red}root${yellow} or a ${red}sudo user${NC}"
+     warn "You can rerun the script as root by issuing  'su' or 'sudo ${0}'${NC}"
+     warn "EXITING due to insufficient privileges"
+     exit 1
+  fi
+}
+
+#
+#  Lock file functions.
+#
+
+set_lock(){
+    touch $lockfile
+}
+
+clear_lock(){
+    lockfile=$1
+    if [ -e $lockfile ]; then
+        rm $lockfile
+    fi
+}
+
+check_lock(){
+    if [ -e $lockfile ]; then
+        error "Another instance of this script appears to be running, you can remove manually with 'rm ${lockfile}', EXITING!"
+        #we shoudlnt clear the lock if we exit here. 
+        trap - EXIT
+        exit 1
+    else
+        set_lock $lockfile
+    fi
+}
+
+#exit paths which clear lock
+clean_exit(){
+    if [ ${#errors_encountered[@]:-0} -gt 0 ];then
+        echo -e "${red}NOTE: ${#errors_encountered[@]} error(s) encountered during kazoo setup${NC}"
+        for error in "${errors_encountered[@]}"; do
+            echo -e "$error"                                  
+        done      
+    fi
+
+    clear_lock $lockfile
+    echo -e -n "${NC}"
+    trap - EXIT
+    exit 0;
+}
+
+error_exit(){
+    error "exiting due to: ${@:-"unknown error"}"
+    echo 
+    echo -e "NOTE: ${yellow}you can restart this script manually with ${green}$0 ${args_save}${NC}"
+    clear_lock $lockfile
+    echo -e -n "${NC}"
+    trap - EXIT
+    exit 1;
+
+}
+
+int_exit(){
+    echo 
+    echo -e "${yellow}EXITING: due to user interrupt! ${NC}"
+    echo -e "${yellow}you can restart this script manually with ${green}$0 ${args_save} ${NC} "
+    clear_lock $lockfile
+    echo -e -n "${NC}"
+    trap - EXIT
+    exit 1;
+}
+
+#gets list of Ethernet interfaces and puts in array interfaces
+get_interfaces(){
+    local interface
+    for interface in `ifconfig | grep Ethernet |cut -d" " -f1`;do
+        interfaces+=("$interface")
+    done
+}
+
+#gets list of ip addresses from interfaces list
+get_system_ip(){
+    local ip_address
+    for interface in ${interfaces[@]}; do
+        for ip_address in `ifconfig $interface | grep "inet addr" | cut -d: -f2 | cut -d" " -f1`;
+        do
+            ip_addresses+=("$ip_address")
+        done
+    done
+}
+ 
+get_system_hostname(){
+    system_hostname=$(hostname -f)
+}
+
+check_info_file(){
+    if [[ -e /etc/kazoo/kazoo_boot.conf ]]; then
+        ip_address=`sed -n "s|IP_ADDRESS=\(.*\)|\1|p" /etc/kazoo/kazoo_boot.conf`
+        admin_user=`sed -n "s|ADMIN_USER=\(.*\)|\1|p" /etc/kazoo/kazoo_boot.conf`
+        admin_password=`sed -n "s|ADMIN_PASSWORD=\(.*\)|\1|p" /etc/kazoo/kazoo_boot.conf`
+        admin_account=`sed -n "s|ADMIN_ACCOUNT=\(.*\)|\1|p" /etc/kazoo/kazoo_boot.conf`
+        admin_realm=`sed -n "s|ADMIN_REALM=\(.*\)|\1|p" /etc/kazoo/kazoo_boot.conf`
+    fi
+}
+
+set_info_file(){
+    echo "IP_ADDRESS=$system_ip_address"  >  /etc/kazoo/kazoo_boot.conf
+    echo "ADMIN_USER=$admin_user"         >> /etc/kazoo/kazoo_boot.conf
+    echo "ADMIN_PASSWORD=$admin_password" >> /etc/kazoo/kazoo_boot.conf
+    echo "ADMIN_ACCOUNT=$admin_account"   >> /etc/kazoo/kazoo_boot.conf
+    echo "ADMIN_REALM=$admin_realm"       >> /etc/kazoo/kazoo_boot.conf
+}
+
+check_ip(){
+    #check if system already has IP address 
+    local ip_address=""; check_info_file
+    
+    ! [[ ${ip_address:-} ]] && return 1
+
+    
+    if [[ $ip_address =~ $ip_address_regex ]]; then
+        system_ip_address=$ip_address
+        return 0
+    else 
+        warn "system IP address ${red}${ip_address}${yellow} is not a valid"
+        return 1
+    fi
+}
+
+ask_ip_selection(){
+    local -a ip_addresses
+    local -a interfaces
+
+    get_interfaces
+    get_system_ip 
+
+    if [ ${#ip_addresses[@]:-} -eq 1 ];then
+        system_ip_address=${ip_addresses[0]}
+    elif [  ${#ip_addresses[@]:-}  -gt 1 ];then
+             echo 
+         info "Please select the ${red}IP address${blue} to use for handling traffic on this server: "
+             echo 
+         PS3="Select IP address: "
+         select opt in ${ip_addresses[@]}; do
+             case $opt in
+                 *)
+                     system_ip_address=$opt
+                     break
+                     ;;
+             esac
+         done
+    else 
+        warn "NO ip addresses are configured!"
+        system_ip_address=""
+        local system_ip_address_question="Please enter a system ip address you will be assigning to this server"
+        local system_ip_address_re="$ip_address_regex"
+        local system_ip_address_hint="Since you do not currently have an IP address, you can use this menu to add the IP you plan to assign after setup"
+        local system_ip_address_ref="system_ip_address"
+        ask system_ip_address
+    fi
+    
+}
+
+wait_apps_running(){
+    dbg "Waiting for whapps to start by polling: ${NC}/opt/kazoo/utils/sup/sup whapps_controller list_apps"
+
+    while
+    /opt/kazoo/utils/sup/sup whapps_controller list_apps &>> $logfile
+    (( $? != 0 ))
+    do
+        continue
+    done
+
+    dbg "Waiting for ecallmgr to start by polling: ${NC}/opt/kazoo/utils/sup/sup -necallmgr ecallmgr_maintenance list_fs_nodes"
+
+    while
+    /opt/kazoo/utils/sup/sup -necallmgr ecallmgr_maintenance list_fs_nodes &>> $logfile
+    (( $? != 0 ))
+    do
+        continue
+    done
+}
+
+
+################################################################################
+#  run_cmd NOTE:
+#  *_cmd and *_dbg are access commands and debug statements for use in set_value
+#  TOKEN is replaced using with the $value argument in set_value
+#  using variable expansion substring replacement
+#  used to run long running commands that have lots of output to restrict to a 
+#  as single line.  
+################################################################################
+
+run_cmd(){
+    local name=$1
+    local value="${2:-}"
+
+    #use $name to find variables we want
+    local _debug=\$"${name}_dbg"
+    local _cmd=\$"${name}_cmd"
+    local _error=\$"${name}_error"
+
+    #dereference same
+    local debug=`eval "expr \"${_debug}\""`
+    local cmd=`eval "expr \"${_cmd}\""`
+    local error=`eval "expr \"${_error}\""`
+
+    local debug_final=$debug
+    local cmd_final=$cmd
+    local error_final=$error
+
+    #replace TOKEN with $value
+    if [[ ${value:-} ]]; then    
+        debug_final=${debug//TOKEN/$value}
+        cmd_final=${cmd//TOKEN/$value}
+        error_final=${error//TOKEN/$value}
+    fi
+
+    #run command and log output to $logfile
+    dbg $debug_final
+
+    while read line; do 
+        echo -en "\r${ceol}${line:-}"
+    done < <(eval $cmd_final |& log_print || error "$error")
+     echo
+
+}
+
+#
+# sets the value for a parameter
+#
+
+set_value(){
+
+    ################################################################################
+    # set_value NOTE:
+    # *_cmd and *_dbg are access commands and debug statements for use in set_value
+    # TOKEN is replaced using with the $value argument in set_value
+    # using variable expansion substring replacement
+    ################################################################################
+
+    local name=$1
+    local value="$2"
+
+    #use $name to find variables we want
+    local _debug=\$"${name}_dbg"
+    local _cmd=\$"${name}_cmd"
+
+    #dereference same
+    local debug=`eval "expr \"${_debug}\""`
+    local cmd=`eval "expr \"${_cmd}\""`
+    
+    #replace TOKEN with $value
+    local debug_final=${debug//TOKEN/$value}
+    local cmd_final=${cmd//TOKEN/$value}
+
+    #run command and log output to $logfile
+    dbg $debug_final
+    eval $cmd_final &>> $logfile || error_exit "Command $cmd_final failed"
+
+    #verify command returned success response, throw error if failed
+    if [[ $? -ne 0 ]];then
+        error "$cmd_final failed while $debug_final"
+    fi
+}
+
+check_re(){
+   val=$1
+   re=$2
+   echo $val | grep -P "$re" &>> $logfile || return 1
+   return 
+}
+
+#
+#ask user for input for defined questions, gets input for the user for $name parameter
+#
+
+ask(){
+    local name="$1"
+
+    ################################################################################
+    #ask NOTE:
+    # *_question, *_re, *_hint and *_ref are used by ask
+    # for getting user input, this allows us to pass one name to ask and do all
+    # defined actions required to provide help, get input, and save it to a var
+    #### set_value variables #######################################################
+    # *_dbg - print statement when setting parameter
+    # *_cmd - command to execute
+    #### ask variables #############################################################
+    # *_question - the question to ask when getting the value from user
+    # *_re       - the re to use to validate response
+    # *_hint     - the hint to provide in case of blank line, ? or invalid parameter
+    # *_ref      - the ref to the variable used to store the user requested value
+    ################################################################################
+    # some regexes are provided for convenience and readability in the setup_common lib
+    #  url_regex - matches valid http and https urls with optional port specified
+    #  ip_address_regex - matches valid ip addresses
+    #  fqdn_regex - matches fully qualified domain names
+    #  ip_fqdn_regex - matches ip OR fully qualified domain names
+    ##################################################################################
+
+   #we use the name value to "dereference" the variables we need for this function
+    local _question=\$"${name}_question"
+    local _re=\$"${name}_re"
+    local _ref=\$"${name}_ref"
+    local _hint=\$"${name}_hint"
+    #dereference same
+    local question=`eval "expr \"${_question}\""`
+    local re=`eval "expr \"${_re}\""`
+    local ref=`eval "expr \"${_ref}\""`
+    local hint=`eval "expr \"${_hint}\""`
+
+    info $question
+    read ANSWER
+  
+    if ! [[ ${ANSWER:-} ]];then
+        warn $hint
+	ask "$name"
+    fi
+
+   #if invalid answer, we show them the hint and call ourselves with our args
+    if ! check_re $ANSWER $re ; then
+        warn $hint
+        ask "$name"
+    fi
+
+    eval $ref='$ANSWER'
+}
+
+# recursive function to get yes or no response for $question, 
+# will only accept y|n as valid options, otherwise loops
+# You should define a local $answer in whatever function calls this. 
+
+confirm(){
+    question=$1
+    echo -ne "${blue}${question}${NC}"
+    read -p " " -n 1 answer
+    if [[ $answer =~ ^[yYnN] ]];then
+        echo
+        return
+    else
+        warn "Unknown option '$answer'"
+        warn " Please enter either '${red}y${yellow}' or '${red}n${yellow}'!"
+        confirm "$question"
+    fi
+}
+
+
+#
+# functions for handling erlang.cookie if required by script
+#
+
+get_default_cookie(){
+    if [ -e $cookie_file ];then
+        default_cookie=$(<$cookie_file)
+    fi 
+    
+    if ! [  ${default_cookie:-} ];then
+        local answer
+        confirm "Do you want to generate a new erlang cookie? [y|n]"
+        if [[ $answer =~ ^[yY] ]];then
+            generate_erlang_cookie
+        else
+            default_cookie=""                                                                                                                     
+            default_cookie_question="Please enter the default erlang cookie for your system: "
+            default_cookie_re=".*"
+            default_cookie_hint="Hint: this should be the same throughout the cluster" 
+            default_cookie_ref="default_cookie" 
+            ask "default_cookie"
+            set_cookie_file $default_cookie
+        fi
+    fi
+}
+
+generate_erlang_cookie(){
+    UUID=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+    set_cookie_file $UUID  
+    default_cookie=$UUID 
+}
+
+set_cookie_file(){
+    cookie=$1
+    echo -n $cookie > $cookie_file
+}
+

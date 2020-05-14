@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+set -e
+set -o nounset
+
+#logfile
+#lock_file
+lockfile="/var/lock/subsys/setup_rabbitmq.lockfile"
+
+#Files to edit
+rabbitmq_env_conf="/etc/kazoo/rabbitmq/rabbitmq-env.conf"
+
+. /opt/kazoo_install/setup_common
+trap error_exit SIGHUP SIGTERM ERR EXIT
+trap int_exit SIGINT SIGQUIT
+
+#Rabbit IP ADDRESS
+ip_address=""
+ip_address_dbg="setting $rabbitmq_env_conf -  = TOKEN"
+ip_address_cmd="sed -i 's|NODE_IP_ADDRESS=.*|NODE_IP_ADDRESS=TOKEN|' $rabbitmq_env_conf"
+ip_address_question="Please enter the IP address that rabbitmq-server should use for listening: "
+ip_address_re="$ip_address_regex"
+ip_address_hint="This is typically 0.0.0.0 to listen on all IP addresses"
+ip_address_ref="ip_address"
+
+interactive(){
+    ask ip_address
+}
+
+info " : Configuring RabbitMQ : "
+
+check_root
+check_lock
+
+if [[ ${1:-} =~ -a ]];then
+    all_in_one=1
+fi
+
+if [  ${all_in_one:-} ];then
+   #if allinone we default everything!
+   ip_address="0.0.0.0"
+else
+   info "NOTE: You can type '${NC}?${blue}' in response to any question for a hint"
+   interactive
+fi
+
+dbg "Applying rabbitmq configuration..."
+
+
+set_value ip_address $ip_address
+
+clean_exit 
