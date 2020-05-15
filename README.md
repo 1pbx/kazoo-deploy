@@ -1,4 +1,7 @@
 # kazoo-deploy
+
+# IMPORTANT :   THIS IS CURRENTLY BEING TRANSITIONED FROM THE OLD CENTOS 6 + KAZOO 3 TO CENTOS 7 + KAZOO 7 AND IS NOT WORKING AT THE MOMENT.
+
 Kazoo deployment scripts
 
 Scripts to deploy Kazoo components individually or as an all-in-one.
