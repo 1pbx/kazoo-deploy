@@ -2,6 +2,8 @@
 
 Our goal is to maintain a set of scripts with interactive and automated install methods.  These scripts will work on fresh minimal installs of CentOS 7.
 
+## NOTE : THIS IS CURRENTLY BEING TRANSITIONED TO CENTOS7+Kazoo4 AND IS NOT IN A WORKING STATE AT THE MOMENT
+
 ## Maintained by [1pbx Solutions Inc.](https://1pbx.io/)
 
 [1pbx](https://1pbx.io/) has taken the original scripts which were created for CentOS 6 systems and updated them to be used with CentOS 7.
