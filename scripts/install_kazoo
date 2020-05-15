@@ -4,7 +4,10 @@ set -o nounset
 DEBUG="0"
 ceol=`tput el`
 
-default_repo_url="http://repo.2600hz.com/2600hz.repo"
+## We will only install the latest version of Kazoo. At this point that is version 4.3
+
+default_repo_rpm="https://packages.2600hz.com/centos/7/stable/2600hz-release/4.3/2600hz-release-4.3-0.el7.centos.noarch.rpm"
+
 
 #global values for menu selection
 install_source=""
@@ -17,15 +20,12 @@ auto_pilot=""
 
 #re
 hostname_check_re="(?=^.{4,255}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$)"
-repo_url_re="^(https?:\/\/)?([0-9a-z\.-\.]+)([a-z\.]{2,6})?([:][0-9]+)?([\/\w\.-]*)*\/[a-zA-Z0-9\-\_]+.repo$"
+repo_url_re="^(https?:\/\/)?([0-9a-z\.-\.]+)([a-z\.]{2,6})?([:][0-9]+)?([\/\w\.-]*)*\/[a-zA-Z0-9\-\_]+.rpm$"
 
 #repo names
-stable_release="2600hz_R15B"
-stable_base="2600hz_base"
-staging_release="2600hz_R15B_staging"
-staging_base="2600hz_base_staging"
-latest_release="2600hz_R15B_latest"
-latest_base="2600hz_base_latest"
+stable_release="stable"
+staging_release="staging"
+experimental_release="experimental"
 
 #release info for menus
 stable_version=""
@@ -38,12 +38,12 @@ declare -A selected_packages
 declare -A packages
 
 #yum package names
-kazoo_package="kazoo-R15B.x86_64"
-freeswitch_package="kazoo-freeswitch-R15B.x86_64"
-kamailio_package="kazoo-kamailio.x86_64"
-bigcouch_package="kazoo-bigcouch-R15B.x86_64"
+kazoo_package="kazoo"
+freeswitch_package="kazoo-freeswitch"
+kamailio_package="kazoo-kamailio"
+bigcouch_package="kazoo-bigcouch"
 kazoo_ui_package="monster-ui*"
-haproxy_package="haproxy.x86_64"
+haproxy_package="haproxy"
 rabbitmq_package=""
 
 #Assign package names to packages Associative array for use in menus
@@ -182,7 +182,7 @@ usage(){
     echo "-a                         - auto-pilot install, requires -s -r and -f arguments"
     echo "-s <local|network>         - The source for the kazoo install media"
     echo "-u <yum repository URL>    - Optionally specify a custom yum repository  URL to use for installation"
-    echo "-r <Stable|Staging|Latest> - The release version to select on the repo"
+    echo "-r <Stable|Staging|Experimental> - The release version to select on the repo"
     echo "-f <hostname>              - The system hostname to set during install"
     echo "-h                         - displays this menu"
 
@@ -257,15 +257,12 @@ set_install_release(){
 
     if [[ $release_version =~ [Ss]table ]];then
       install_release=$stable_release
-      install_base=$stable_base
       install_version=$stable_version
     elif  [[ $release_version =~ [Ss]taging ]];then
       install_release=$staging_release
-      install_base=$staging_base
       install_version=$staging_version
     elif [[ $release_version =~ [Ll]atest ]];then
       install_release=$latest_release
-      install_base=$latest_base
       install_version=$latest_version
     else
       return 1
@@ -277,10 +274,10 @@ set_repo_url(){
     url=${1:-}
 
     if ! [[ ${url:-} ]];then
-        install_repo_url=$default_repo_url
-    elif [[ ${url:-} =~ [a-zA-Z0-9]+.repo ]];then
+        install_repo_rpm=$default_repo_rpm
+    elif [[ ${url:-} =~ [a-zA-Z0-9]+.rpm ]];then
         check_re $url $repo_url_re || return 1       
-        install_repo_url=$url
+        install_repo_rpm=$url
     else 
         return 1
     fi
@@ -349,10 +346,10 @@ set_network(){
     local answer  
     confirm "Do you want to setup your network configuration? [y|n]"
     if [[ ${answer:-} =~ [yY] ]];then
-         system-config-network 
+         nmtui 
          set_interfaces_up
          dbg "restarting network service to apply changes"
-         service network restart
+         systemctl restart network
     fi 
 }
 
@@ -373,7 +370,7 @@ set_hostname(){
         warn "This system has hostname ${red}$current_system_hostname"
         warn "This is not a fuly qualified domain name!"
         warn "This must be a valid FQDN for kazoo to work properly."
-        warn "example FQDN: test.2600hz.com" 
+        warn "example FQDN: test.1pbx.io" 
         warn "Please set a fully qualified domain name for the hostname."
         warn "Upon completion of this step a system reboot is recommended"
     fi
@@ -401,7 +398,7 @@ set_hostname(){
     fi
 
     #set the new hostname
-    hostname $fqdn
+    hostnamectl set-hostname $fqdn
 
     shortname=${fqdn%%\.*}
     
@@ -430,15 +427,15 @@ set_hostname(){
 
 repo_ask(){
     local answer
-    confirm "Install from repo.2600hz.com ('n' to use your own repo) [y|n]?" 
+    confirm "Install from packages.2600hz.com ('n' to use your own repo) [y|n]?" 
 
     if [[ $answer =~ [nN] ]]; then 
-        echo "Please enter the yum .repo file url for your repo or hit enter for default. "
-        read  -p "For example \"$default_repo_url\": " selected_repo
+        echo "Please enter the yum .rpm file url for your repo or hit enter for default. "
+        read  -p "For example \"$default_repo_rpm\": " selected_repo
         set_repo_url $selected_repo
         [ $? -ne 0 ] && repo_ask
     else 
-        set_repo_url $default_repo_url
+        set_repo_url $default_repo_rpm
     fi 
 
     ping_test $install_repo_url
@@ -500,7 +497,7 @@ handle_args(){
       case $opt in
            a) auto_pilot=1 ;;
            s) set_install_source $OPTARG  || usage "$opt - Invalid source specified -s $OPTARG" ;;
-           u) set_repo_url $OPTARG        || usage "$opt - Invalid repo URL $OPTARG specified"  ;;    
+           u) set_repo_rpm $OPTARG        || usage "$opt - Invalid repo URL $OPTARG specified"  ;;    
            r) set_install_release $OPTARG || usage "$opt - Invalid release $OPTARG specified"   ;;
            f) system_hostname=$OPTARG ;;
            h) usage "" ;;
@@ -511,7 +508,7 @@ handle_args(){
   #if there are user args, we set package to all in one, otherwise we just go through interactive install
   if [[ $auto_pilot ]];then
       ! [[ ${install_source:-}   ]] && usage "missing required argument -s <local|network>"  
-      ! [[ ${install_repo_url:-} ]] && set_repo_url $default_repo_url
+      ! [[ ${install_repo_rpm:-} ]] && set_repo_url $default_repo_rpm
       ! [[ ${install_release:-}  ]] && usage "missing required argument -r <Stable|Staging|Latest>"
       ! [[ ${system_hostname:-}  ]] && usage "missing required argument -f <hostname fqdn>"  
 
@@ -557,7 +554,7 @@ repo_menu(){
     info 'Please choose the release version to install. '
 
     PS3='release: '
-	local options=("Stable  ($stable_version) - recommended" "Staging ($staging_version) - testing/development" "Latest  ($latest_version) - expert")
+	local options=("Stable  ($stable_version) - recommended" "Staging ($staging_version) - testing/development" "Experimental  ($latest_version) - expert")
     select opt in "${options[@]}"; do
         case $opt in
             Stable*)
@@ -568,8 +565,8 @@ repo_menu(){
                 set_install_release "Staging"
                 break
                 ;;
-            Latest*)
-                set_install_release "Latest"
+            Experimental*)
+                set_install_release "Experimental"
                 break
                 ;;
             *)
@@ -639,7 +636,7 @@ yum_loop(){
 
 install_prereqs(){
     dbg "Installing prerequisite packages."
-    yum_loop "yum-utils curl sed rsyslog system-config-network-tui" || error_exit "install prerequisite failed!"
+    yum_loop "epel-release yum-utils curl sed rsyslog psmisc ntp" || error_exit "install prerequisite failed!"
 }
 
 install_packages(){
@@ -686,7 +683,6 @@ if [[ "$install_source" == "network" ]];then
     
     repo_disable 
     repo_enable $install_release
-    repo_enable $install_base
 elif [[ "$install_source" == "local" ]];then
     repo_disable
     repo_enable "2600hz.local"
@@ -700,7 +696,7 @@ echo
 
 install_packages 
 
-dbg "Installed kazoo using version: ${install_version:-}\n     From repositories: [$install_release, $install_base]\n     Hosted on: $install_repo_url"
+dbg "Installed kazoo using version: ${install_version:-}\n     From repositories: [$install_release\n     Hosted on: $install_repo_url"
 
 echo 
 info "====================================: Setup :==================================="
