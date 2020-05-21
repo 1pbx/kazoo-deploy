@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 set -o nounset
 
 DEBUG="0"
@@ -108,6 +108,17 @@ if [[ $EUID -ne 0 ]]; then
    echo -e "${red}EXITING due to insufficient privileges${NC}"
    exit 1
 fi
+
+## Check working directory
+check_working_dir(){
+  local current_dir=$(PWD)
+  if [[ $current_dir = "/opt/kazoo_install" ]];then
+      echo "Current working directory is $current_dir, we may continue"
+  else
+      echo "Current working directory is $current_dir.  We need to move all scripts to /opt/kazoo_install and restart installation."
+      exit 1
+  fi
+}
 
 #lock set, clear, check functions to ensure only one instance of the script is running
 set_lock(){
@@ -592,6 +603,7 @@ install_packages(){
 #
 
 handle_args $@
+check_working_dir
 check_lock
 banner
 set_hostname
