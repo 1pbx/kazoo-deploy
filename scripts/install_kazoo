@@ -6,12 +6,17 @@ ceol=`tput el`
 
 ## We will only install the latest version of Kazoo. At this point that is version 4.3
 
-default_repo_rpm="https://packages.2600hz.com/centos/7/stable/2600hz-release/4.3/2600hz-release-4.3-0.el7.centos.noarch.rpm"
+## default_repo_rpm="https://packages.2600hz.com/centos/7/stable/2600hz-release/4.3/2600hz-release-4.3-0.el7.centos.noarch.rpm"
 
+
+default_RELEASE_BASE=https://packages.2600hz.com/centos/7/stable/2600hz-release
+default_RELEASE_VER=4.3
+default_META_PKG=2600hz-release-${RELEASE_VER}-0.el7.centos.noarch.rpm
+default_repo_rpm=${RELEASE_BASE}/${RELEASE_VER}/${META_PKG}
 
 #global values for menu selection
 install_source=""
-install_repo_url=""
+install_repo_rpm=""
 install_release=""
 install_base=""
 all_in_one=""
@@ -30,7 +35,7 @@ experimental_release="experimental"
 #release info for menus
 stable_version=""
 staging_version=""
-latest_version=""
+experimental_version=""
 install_version=""
 
 #package arrays
@@ -44,7 +49,7 @@ kamailio_package="kazoo-kamailio"
 bigcouch_package="kazoo-bigcouch"
 kazoo_ui_package="monster-ui*"
 haproxy_package="haproxy"
-rabbitmq_package=""
+rabbitmq_package="rabbitmq"
 
 #Assign package names to packages Associative array for use in menus
 packages['kazoo']=$kazoo_package
@@ -182,7 +187,6 @@ usage(){
     echo "-a                         - auto-pilot install, requires -s -r and -f arguments"
     echo "-s <local|network>         - The source for the kazoo install media"
     echo "-u <yum repository URL>    - Optionally specify a custom yum repository  URL to use for installation"
-    echo "-r <Stable|Staging|Experimental> - The release version to select on the repo"
     echo "-f <hostname>              - The system hostname to set during install"
     echo "-h                         - displays this menu"
 
@@ -252,23 +256,6 @@ set_package(){
 }
 
 
-set_install_release(){
-    local release_version=$1
-
-    if [[ $release_version =~ [Ss]table ]];then
-      install_release=$stable_release
-      install_version=$stable_version
-    elif  [[ $release_version =~ [Ss]taging ]];then
-      install_release=$staging_release
-      install_version=$staging_version
-    elif [[ $release_version =~ [Ll]atest ]];then
-      install_release=$latest_release
-      install_version=$latest_version
-    else
-      return 1
-    fi 
-
-}
 
 set_repo_url(){
     url=${1:-}
@@ -438,9 +425,9 @@ repo_ask(){
         set_repo_url $default_repo_rpm
     fi 
 
-    ping_test $install_repo_url
+    ping_test $install_repo_rpm
 
-    dbg "Selected $install_repo_url for installation source" 
+    dbg "Selected $install_repo_rpm for installation source" 
 }
 
 repo_disable(){
@@ -450,11 +437,8 @@ repo_disable(){
 
 repo_add(){
     dbg "Adding 2600hz repo from $1"
-    repo_file=$(echo -n $1| sed -n "s|.*/\(.*.repo\)|\1|p")
    
-    [ -e /etc/yum.repos.d/$1 ] && rm /etc/yum.repos.d/$1 
-    
-    yum-config-manager --add-repo $1 &>> $install_log || error_exit "repo_add failed to add $1!"
+    yum install -y $1
 }
 
 repo_enable(){
@@ -462,28 +446,6 @@ repo_enable(){
     yum-config-manager --enable $1 &>> $install_log || error_exit "repo_enable failed enabling repo $1"
 }
 
-repo_list_version(){
-    version=""
-    list_package=$1
-    list_repo=$2
-    dbg "Getting version info for $list_repo release for package $list_package"
-    release_version=`yum --disablerepo="*" --enablerepo="$list_repo" list | grep $list_package | grep $list_repo | awk '{print $2}'`
-    version=$release_version    
-}
-
-get_available_versions(){
-    local version
- 
-    repo_list_version $kazoo_package $stable_release
-    stable_version=$version
-    
-    repo_list_version $kazoo_package $staging_release
-    staging_version=$version
-    
-    repo_list_version $kazoo_package $latest_release
-    latest_version=$version
-
-}
 
 #
 # Menu and args parsers 
@@ -497,8 +459,7 @@ handle_args(){
       case $opt in
            a) auto_pilot=1 ;;
            s) set_install_source $OPTARG  || usage "$opt - Invalid source specified -s $OPTARG" ;;
-           u) set_repo_rpm $OPTARG        || usage "$opt - Invalid repo URL $OPTARG specified"  ;;    
-           r) set_install_release $OPTARG || usage "$opt - Invalid release $OPTARG specified"   ;;
+           u) set_repo_url $OPTARG        || usage "$opt - Invalid repo URL $OPTARG specified"  ;;    
            f) system_hostname=$OPTARG ;;
            h) usage "" ;;
            *) usage "Unknown option $opt selected!" ;;
@@ -546,37 +507,6 @@ main_menu(){
     echo
 }
 
-
-repo_menu(){
-    printf "\n"
-    info  "=============================: Version Selection :=============================="
-    printf "\n"
-    info 'Please choose the release version to install. '
-
-    PS3='release: '
-	local options=("Stable  ($stable_version) - recommended" "Staging ($staging_version) - testing/development" "Experimental  ($latest_version) - expert")
-    select opt in "${options[@]}"; do
-        case $opt in
-            Stable*)
-                set_install_release "Stable"
-                break
-                ;;
-            Staging*)
-                set_install_release "Staging"
-                break
-                ;;
-            Experimental*)
-                set_install_release "Experimental"
-                break
-                ;;
-            *)
-                warn "invalid option"
-                ;;
-        esac
-    done
-
-    dbg "Selected version $install_release, $install_base for installation"
-}
 
 
 package_menu(){
@@ -674,15 +604,10 @@ install_prereqs
 ! [[ ${install_source:-} ]] && main_menu
 
 if [[ "$install_source" == "network" ]];then   
-    ! [[ ${install_repo_url:-}  ]] && repo_ask 
+    ! [[ ${install_repo_rpm:-}  ]] && repo_ask 
     
-    repo_add $install_repo_url
-    get_available_versions
+    repo_add $install_repo_rpm
     
-    ! [[ ${install_release:-}  ]] && repo_menu 
-    
-    repo_disable 
-    repo_enable $install_release
 elif [[ "$install_source" == "local" ]];then
     repo_disable
     repo_enable "2600hz.local"
@@ -696,7 +621,7 @@ echo
 
 install_packages 
 
-dbg "Installed kazoo using version: ${install_version:-}\n     From repositories: [$install_release\n     Hosted on: $install_repo_url"
+dbg "Installed kazoo from: $install_repo_rpm"
 
 echo 
 info "====================================: Setup :==================================="
