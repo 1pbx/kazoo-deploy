@@ -13,18 +13,19 @@ fi
 
 echo "Stopping Services"
 
-service kz-whistle_apps stop 
-service kz-ecallmgr stop
-service haproxy stop
-service freeswitch stop
-service bigcouch stop
-service rabbitmq-server stop
-service kamailio stop
-service httpd stop
+systemctl stop kazoo-applications 
+systemctop stop kazoo-ecallmgr
+systemctl stop kazoo-haproxy 
+systemctop stop kazoo-freeswitch
+systemctl stop kazoo-bigcouch 
+systemctop stop kazoo-rabbitmq
+systemctl stop kazoo-kamailio 
+systemctop stop httpd
+
 
 echo "Removing Packages"
 
-yum remove kazoo-configs kazoo-bigcouch haproxy kazoo-R15B kazoo-prompts kazoo-freeswitch-R15B kazoo-ui httpd kazoo-librabbitmq monster-ui*
+yum remove kazoo-configs kazoo-bigcouch kazoo-haproxy kazoo kazoo-freeswitch httpd kazoo-librabbitmq monster-ui* kazoo-applications*
 
 echo "removing old directories"
 
