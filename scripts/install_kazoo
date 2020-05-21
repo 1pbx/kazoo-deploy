@@ -11,8 +11,8 @@ ceol=`tput el`
 
 default_RELEASE_BASE=https://packages.2600hz.com/centos/7/stable/2600hz-release
 default_RELEASE_VER=4.3
-default_META_PKG=2600hz-release-${RELEASE_VER}-0.el7.centos.noarch.rpm
-default_repo_rpm=${RELEASE_BASE}/${RELEASE_VER}/${META_PKG}
+default_META_PKG=2600hz-release-${default_RELEASE_VER}-0.el7.centos.noarch.rpm
+default_repo_rpm=${default_RELEASE_BASE}/${default_RELEASE_VER}/${default_META_PKG}
 
 #global values for menu selection
 install_source=""
@@ -49,7 +49,7 @@ kamailio_package="kazoo-kamailio"
 bigcouch_package="kazoo-bigcouch"
 kazoo_ui_package="monster-ui*"
 haproxy_package="haproxy"
-rabbitmq_package="rabbitmq"
+rabbitmq_package="kazoo-rabbitmq"
 
 #Assign package names to packages Associative array for use in menus
 packages['kazoo']=$kazoo_package
@@ -111,7 +111,7 @@ fi
 
 ## Check working directory
 check_working_dir(){
-  local current_dir=$(PWD)
+  local current_dir=$(pwd)
   if [[ $current_dir = "/opt/kazoo_install" ]];then
       echo "Current working directory is $current_dir, we may continue"
   else
@@ -232,7 +232,7 @@ confirm(){
 
 ping_test(){
    repo_url=$1
-   repo_host=$(echo $repo_url | sed -n "s|^https*://\(.*\)/.*|\1|p")
+   repo_host=$(echo $repo_url | sed -e 's@^.*://@@' -e 's/[/:].*$//' -e 's/^www\.//')
  
    dbg "pinging $repo_host to verify it is reachable"   
 
@@ -274,7 +274,6 @@ set_repo_url(){
     if ! [[ ${url:-} ]];then
         install_repo_rpm=$default_repo_rpm
     elif [[ ${url:-} =~ [a-zA-Z0-9]+.rpm ]];then
-        check_re $url $repo_url_re || return 1       
         install_repo_rpm=$url
     else 
         return 1
@@ -308,44 +307,12 @@ enable_onboot(){
 
 }
 
-set_interfaces_up(){
-    local -a interfaces
-    while read line; do 
-        if [[ $line =~ ^[0-9]:.* && $line =~ "state DOWN" ]];then
-             local int=`echo $line| cut -d' ' -f 2`;
-             interfaces+=(${int%%:*})
-        fi
-    done < <(ip link)
-
-    [[  ${#interfaces[@]:-} -eq 0 ]] && return
-
-    
-    for int in ${interfaces[@]}; do
-        local $answer=""
-        confirm "Interface $int is currently down, do you want to bring this up? [Y|N]"
-     
-        if [[ $answer =~ [Yy] ]];then
-            dbg "bringing up interface ${red}${int}${NC}" 
-            ifup $int || error "interface $int failed to come up"
-        fi
-
-        onboot=$(grep -s ONBOOT "/etc/sysconfig/network-scripts/ifcfg-${int}")
-
-        if [[ ! ${onboot:-} ]];then
-            enable_onboot 'add' $int
-        elif [[ ${onboot:-} == 'ONBOOT=no' ]];then
-            enable_onboot 'replace' $int 
-        fi
-    done
-
-}
 
 set_network(){
     local answer  
     confirm "Do you want to setup your network configuration? [y|n]"
     if [[ ${answer:-} =~ [yY] ]];then
          nmtui 
-         set_interfaces_up
          dbg "restarting network service to apply changes"
          systemctl restart network
     fi 
@@ -566,18 +533,12 @@ package_menu(){
  
 yum_loop(){
     pack="$1"
-    ret=0
-    while read line; do
-        echo -en "\r${ceol}$line"         
-    done < <(yum install -y $pack |& log_print || ret=1  )
-    echo
-   
-    return $ret   
+    yum install -y $pack 
 }
 
 install_prereqs(){
     dbg "Installing prerequisite packages."
-    yum_loop "epel-release yum-utils curl sed rsyslog psmisc ntp" || error_exit "install prerequisite failed!"
+    yum_loop "epel-release yum-utils curl sed rsyslog psmisc ntp" 
 }
 
 install_packages(){
@@ -589,12 +550,12 @@ install_packages(){
         [ -z "${pack:-}" ] && continue 
         
         dbg "Installing package $pack" 
-        yum_loop $pack || error_exit "Package install failed for $pack"
+        yum_loop $pack 
     done
 
     if [[ ${selected_packages['monster-ui']:-} ]];then
         dbg "Installing httpd to support monster-ui"
-        yum_loop "httpd" || error_exit "Package install failed for http"
+        yum_loop "httpd" 
     fi 
 }
 
