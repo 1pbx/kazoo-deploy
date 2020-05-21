@@ -1,11 +1,11 @@
 # Install Scripts for Kazoo
 =================
 
-* Simple-installer for installing the stable, staging or latest version of Kazoo on centos 7.
+* Simple-installer for installing the stable version of Kazoo on centos 7.
 
 
 ### How To install: 
-* get all the files from the repo and place them in /opt/kazoo_install 
+* get all the scripts from the repo and place them in /opt/kazoo_install 
 * run 
 ```bash 
 chmod +x /opt/kazoo_install/setup*
