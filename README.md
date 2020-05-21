@@ -7,6 +7,19 @@ Scripts to deploy Kazoo components individually or as an all-in-one.
 
 Meant to be used on fresh CentOS 7 installations with minimal install.
 
+# How to use
+
+1. Clone repo
+2. Copy to approporiate directory
+3. Run installer
+```sh
+git clone https://github.com/1pbx/kazoo-deploy
+mkdir /opt/kazoo_install
+cp kazoo-deploy/scripts/* /opt/kazoo_install
+/opt/kazoo_install/install_kazoo
+```
+
+
 Based on the old install scripts from https://github.com/2600hz/community-scripts specifically the simple-install within this repository https://github.com/2600hz/community-scripts/tree/master/simple-installer
 
 ## Goals
